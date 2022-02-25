@@ -1,0 +1,176 @@
+---
+title: "beepboop TIME SERIES"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(slider)
+```
+
+```{r}
+toolik <- read_csv(here('data/toolikweather.csv'))
+
+
+```
+
+```{r, eval = FALSE}
+
+ggplot(data = toolik, aes(x = date, y = mean_airtemp)) +
+  geom_line()
+
+```
+
+
+```{r}
+toolik_ts <- toolik %>% 
+  mutate(date = lubridate::mdy(date)) %>% 
+  as_tsibble(key = NULL,
+             index = date)
+
+ggplot(data = toolik_ts, 
+       aes(x = date,
+           y = mean_airtemp)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'Mean daily air temp (C)\n at Toolik Station')
+```
+
+
+
+```{r}
+toolik_month <- toolik_ts %>% 
+  index_by(yr_mo = ~yearmonth(.)) %>% 
+  summarize(monthly_mean_temp = mean(mean_airtemp, 
+                                     na.rm = TRUE))
+
+ggplot(data = toolik_month,
+       aes(x = yr_mo,
+           y = monthly_mean_temp)) +
+  geom_line()
+
+ggplot(toolik_month,
+       aes(x = year(yr_mo),
+           y = monthly_mean_temp)) +
+  geom_line(aes(color = month(yr_mo), group = month(yr_mo)))
+
+
+ggplot(toolik_month,
+       aes(x = year(yr_mo),
+           y = monthly_mean_temp)) +
+  geom_line() +
+  facet_wrap(~month(yr_mo, label = TRUE)) +
+  labs(x = 'Year',
+       y = 'Annual mean air temp(C)',
+       table = 'Toolik Station mean annual air temp',
+       subtitle = '1988-2018',
+       caption = 'Figure 1. Source: Shaver F., 2019')
+```
+
+```{r}
+toolik_annual <- toolik_ts %>% 
+  index_by(yearly = ~year(.)) %>% 
+  summarize(annual_airtemp = mean(mean_airtemp,
+            na.rm = TRUE))
+
+ggplot(data = toolik_annual,
+       aes(x = yearly, y = annual_airtemp)) +
+  geom_line()
+```
+
+
+```{r}
+toolik_ts %>% 
+  filter_index('2000-06' ~ '2001-10')
+```
+
+
+## Explore changes in seasonality with seasonplots
+
+```{r}
+toolik_ts %>% 
+  filter(year(date) > 2014) %>% 
+  gg_season(y = mean_airtemp)
+
+```
+
+```{r}
+toolik_month %>% 
+  gg_season(y = monthly_mean_temp)
+```
+
+
+```{r}
+toolik_month %>% 
+  gg_subseries(monthly_mean_temp)
+```
+
+## Moving averages!
+```{r}
+set.seed(2021)
+test <- rnorm(100, mean = 40, sd = 10)
+
+slide(test, ~.x, .before = 2, .after = 2)
+
+w5 <- as.numeric(slide(test, mean, .before = 2, .after = 2))
+w11 <- as.numeric(slide(test, mean, .before = 5, .after = 5))
+w19 <- as.numeric(slide(test, mean, .before = 9, .after = 9))
+
+combo <- tibble(time = 1:100, test, w5, w11, w19) %>% 
+  pivot_longer(test:w19, 
+               names_to = 'model',
+               values_to = 'value')
+
+ggplot(data = combo) +
+  geom_line(aes(x = time,
+                y = value,
+                color = model))
+```
+
+```{r}
+roll_toolik_15 <- toolik_ts %>% 
+  mutate(ma_15d = as.numeric(slide(toolik_ts$mean_airtemp, mean, .before = 7, .after = 7)))
+
+
+roll_toolik_61 <- toolik_ts %>% 
+  mutate(ma_61d = as.numeric(slide(toolik_ts$mean_airtemp, mean, .before = 30, .after = 30))) 
+
+ggplot(data = toolik_ts, aes(x = date,
+                             y = mean_airtemp)) +
+  geom_line(size = .2, color = 'grey') +
+  geom_line(data = roll_toolik_15, aes(y = ma_15d),
+            color = 'orange') +
+    geom_line(data = roll_toolik_61, aes(y = ma_61d),
+            color = 'blue')
+```
+
+
+## Autocorrelation function
+
+```{r}
+toolik_ts %>% 
+  ACF(mean_airtemp) %>% 
+  autoplot()
+
+toolik_month %>% 
+  ACF(monthly_mean_temp) %>% 
+  autoplot()
+```
+
+## Decomposition
+
+```{r}
+toolik_dec <- toolik_month %>% 
+  model(STL(monthly_mean_temp ~ season(window = Inf))) 
+  
+components(toolik_dec) %>% 
+  autoplot()
+```
+
+
